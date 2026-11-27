@@ -1,0 +1,41 @@
+# Rust / Tauri
+target/
+desktop/gen/
+# JS
+node_modules/
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/*.jks
+android/*.keystore
+.gradle/
+*.apk
+*.aab
+# Segredos e dados pessoais: NUNCA versionar
+*.jks
+*.keystore
+*.key
+*.pem
+*.p12
+*.pfx
+.env
+.env.*
+*.env
+credenciais*
+secrets/
+*.db
+*.db-wal
+*.db-shm
+/data/
+/perfil-*/
+# Editores e SO
+.idea/
+.vscode/
+*.log
+.DS_Store
+Thumbs.db
+dist/
+*.zip
+*.tar.gz
