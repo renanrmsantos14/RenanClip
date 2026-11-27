@@ -144,7 +144,7 @@ class MainActivity : Activity() {
     }
 
     private fun confirmClear() {
-        AlertDialog.Builder(this).setMessage("Apagar todo o histórico não fixado, neste e nos aparelhos conectados?")
+        AlertDialog.Builder(this).setMessage("Apagar todo o histórico não fixado, só neste aparelho?")
             .setPositiveButton("Apagar") { _, _ -> Rc.engine.clear() }.setNegativeButton("Cancelar", null).show()
     }
 

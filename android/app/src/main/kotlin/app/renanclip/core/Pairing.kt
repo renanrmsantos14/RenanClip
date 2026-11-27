@@ -24,7 +24,7 @@ class Transcript(
     fun sas(): String {
         val h = Crypto.sha256(ascii("RCLP-sas"), hash())
         val v = ((h[0].toLong() and 255) shl 24 or ((h[1].toLong() and 255) shl 16) or ((h[2].toLong() and 255) shl 8) or (h[3].toLong() and 255)) % 1_000_000
-        return "%06d".format(v)
+        return "%06d".format(java.util.Locale.ROOT, v)
     }
 
     fun pairKey(shared: ByteArray): ByteArray = Crypto.hkdf(hash(), shared, ascii("RCLP pair key"), 32)

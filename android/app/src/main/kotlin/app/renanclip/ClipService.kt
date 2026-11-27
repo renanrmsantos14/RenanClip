@@ -28,12 +28,14 @@ class ClipService : Service() {
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Sincronização", NotificationManager.IMPORTANCE_MIN).apply {
             description = "Mantém o RenanClip conectado aos seus aparelhos"; setShowBadge(false)
         })
+        // startForeground primeiro: o prazo é de poucos segundos e abrir o banco/porta pode demorar
+        if (!startFg(build(0))) { stopSelf(); return }
         val e = Rc.ensure(this)
-        startFg(build(e.onlineCount()))
+        getSystemService(NotificationManager::class.java).notify(ID, build(e.onlineCount()))
         nsd = NsdHelper(this, e).also { it.start() }
         val cm = getSystemService(ConnectivityManager::class.java)
         net = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(n: Network) { nsd?.restart() }
+            override fun onAvailable(n: Network) { Rc.main.post { nsd?.restart() } }
         }.also { runCatching { cm.registerDefaultNetworkCallback(it) } }
         Rc.listen(listener)
     }
@@ -52,11 +54,12 @@ class ClipService : Service() {
         super.onDestroy()
     }
 
-    private fun startFg(n: Notification) {
+    private fun startFg(n: Notification): Boolean = try {
         if (Build.VERSION.SDK_INT >= 29) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         else startForeground(ID, n)
         running = true
-    }
+        true
+    } catch (_: Exception) { false } // Android 12+: reinício em segundo plano pode ser negado
 
     private fun notifyState() {
         runCatching { getSystemService(NotificationManager::class.java).notify(ID, build(Rc.engine.onlineCount())) }

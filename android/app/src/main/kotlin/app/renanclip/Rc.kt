@@ -30,7 +30,7 @@ object Rc {
     @Volatile private var eng: Engine? = null
     private val listeners = CopyOnWriteArrayList<(Event) -> Unit>()
 
-    val engine: Engine get() = eng ?: error("Rc.ensure não foi chamado")
+    val engine: Engine get() = eng ?: ensure(app) // depois de "Parar", reabrir a tela religa o motor
 
     @Synchronized fun ensure(ctx: Context): Engine {
         app = ctx.applicationContext
@@ -85,7 +85,7 @@ object Rc {
         // mantém só a última dúzia de itens no cache
         root.listFiles()?.sortedByDescending { it.lastModified() }?.drop(12)?.forEach { it.deleteRecursively() }
         dir.mkdirs()
-        val safe = name.replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001f]"), "_").take(120).ifEmpty { "arquivo" }
+        val safe = name.replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001f]"), "_").take(120).trim().let { if (it.isEmpty() || it.all { c -> c == '.' }) "arquivo" else it }
         val f = File(dir, safe)
         f.writeBytes(data)
         return android.net.Uri.Builder().scheme("content").authority("${ctx.packageName}.files").appendPath(dirName).appendPath(safe).build()

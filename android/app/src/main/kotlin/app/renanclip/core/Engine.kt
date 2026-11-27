@@ -376,20 +376,26 @@ class Engine(
         sock.soTimeout = 45_000
         val cid = nextId.getAndIncrement()
         val q = LinkedBlockingQueue<Out>()
-        synchronized(conns) {
-            val old = conns[peer]
-            if (old != null) {
-                // Duas conexões simultâneas: fica a aberta pelo aparelho de menor id (regra igual nos dois lados).
-                val newClient = if (isClient) myHex else peer
-                val oldClient = if (old.isClient) myHex else peer
-                if (newClient > oldClient) { runCatching { sock.close() }; return }
-                old.q.offer(Out.Close); runCatching { old.sock.close() }
+        // Só registra a conexão depois do 1º quadro decifrado com a chave do par: quem só conhece o id
+        // (público no mDNS) não consegue ocupar o lugar do par nem aparecer como "online".
+        var registered = false
+        fun register(): Boolean {
+            synchronized(conns) {
+                val old = conns[peer]
+                if (old != null) {
+                    // Duas conexões simultâneas: fica a aberta pelo aparelho de menor id (regra igual nos dois lados).
+                    val newClient = if (isClient) myHex else peer
+                    val oldClient = if (old.isClient) myHex else peer
+                    if (newClient > oldClient) return false
+                    old.q.offer(Out.Close); runCatching { old.sock.close() }
+                }
+                conns[peer] = Conn(cid, isClient, q, sock)
             }
-            conns[peer] = Conn(cid, isClient, q, sock)
+            store.touchPeer(peer, "", nowMs()) // não sobrescreve o endereço guardado (pode ser nome MagicDNS)
+            backoff.remove(peer)
+            events(Event.Peers)
+            return true
         }
-        store.touchPeer(peer, "", nowMs()) // não sobrescreve o endereço guardado (pode ser nome MagicDNS)
-        backoff.remove(peer)
-        events(Event.Peers)
 
         val writer = Thread({
             try {
@@ -415,6 +421,7 @@ class Engine(
         try {
             while (true) {
                 val plain = rxSeal.open(Frame.read(rd, Frame.MAX_FRAME + 64))
+                if (!registered) { if (!register()) break; registered = true }
                 if (plain.isEmpty()) break
                 val keep = when (plain[0].toInt()) {
                     Proto.T_JSON -> onMsg(peer, q, asm, Msg.parse(String(plain, 1, plain.size - 1, Charsets.UTF_8)))
@@ -423,12 +430,14 @@ class Engine(
                 }
                 if (!keep) break
             }
-        } catch (_: Exception) { }
-        q.offer(Out.Close)
-        runCatching { writer.join(2000) }
-        runCatching { sock.close() }
-        val gone = synchronized(conns) { if (conns[peer]?.cid == cid) { conns.remove(peer); true } else false }
-        if (gone) events(Event.Peers)
+        } catch (_: Exception) {
+        } finally {
+            q.offer(Out.Close)
+            runCatching { writer.join(2000) }
+            runCatching { sock.close() }
+            val gone = synchronized(conns) { if (conns[peer]?.cid == cid) { conns.remove(peer); true } else false }
+            if (gone) events(Event.Peers)
+        }
     }
 
     private fun onMsg(peer: String, q: LinkedBlockingQueue<Out>, asm: HashMap<String, Asm>, m: Msg): Boolean {

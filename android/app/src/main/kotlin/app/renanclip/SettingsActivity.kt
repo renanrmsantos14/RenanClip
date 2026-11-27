@@ -5,11 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings as Sys
-import android.text.Editable
 import android.text.InputType
-import android.text.TextWatcher
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -41,11 +40,11 @@ class SettingsActivity : Activity() {
                 setText(initial); setSingleLine(); setTextColor(p.text)
                 inputType = if (numeric) InputType.TYPE_CLASS_NUMBER else InputType.TYPE_CLASS_TEXT
                 background = Ui.rounded(p.surface, 10, context, p.line); setPadding(Ui.dp(context, 14), 0, Ui.dp(context, 14), 0)
-                addTextChangedListener(object : TextWatcher {
-                    override fun beforeTextChanged(a: CharSequence?, x: Int, y: Int, z: Int) {}
-                    override fun onTextChanged(a: CharSequence?, x: Int, y: Int, z: Int) {}
-                    override fun afterTextChanged(a: Editable?) { on(a.toString()) }
-                })
+                // Salva ao sair do campo ou no "ok" do teclado, não a cada tecla: "30" passaria por "3"
+                // e apagaria o histórico com mais de 3 dias.
+                setOnFocusChangeListener { v, has -> if (!has) on((v as EditText).text.toString()) }
+                imeOptions = EditorInfo.IME_ACTION_DONE
+                setOnEditorActionListener { v, _, _ -> v.clearFocus(); false }
             }
             body.addView(et, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 44)))
         }
@@ -94,6 +93,8 @@ class SettingsActivity : Activity() {
 
     private fun copy(retention: Int = s.retentionDays, paused: Boolean = s.paused, images: Boolean = s.syncImages, files: Boolean = s.syncFiles, maxMb: Int = s.maxBlobMb, theme: String = s.theme) =
         Settings(s.deviceName, retention, paused, images, files, maxMb, s.storeCapMb, theme)
+
+    override fun onPause() { currentFocus?.clearFocus(); super.onPause() }
 
     private fun save(n: Settings) { s = Rc.engine.updateSettings(n) }
 }

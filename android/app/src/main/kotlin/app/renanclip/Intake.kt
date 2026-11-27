@@ -26,6 +26,7 @@ object Intake {
     }
 
     fun fromUri(ctx: Context, uri: Uri, mimeHint: String?, capBytes: Int): Result {
+        if (uri.scheme != "content" || uri.authority == "${ctx.packageName}.files") return Result(null, "Origem não suportada.")
         val cr = ctx.contentResolver
         val mime = (cr.getType(uri) ?: mimeHint ?: "application/octet-stream").lowercase()
         var name = ""
