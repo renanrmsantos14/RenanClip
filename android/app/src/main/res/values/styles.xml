@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppLight" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="AppDark" parent="android:Theme.Material.NoActionBar" />
+    <style name="Overlay" parent="android:Theme.Translucent.NoTitleBar" />
+</resources>
