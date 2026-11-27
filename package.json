@@ -1,0 +1,14 @@
+{
+  "name": "renanclip",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Área de transferência compartilhada entre PCs e Android (RenanClip)",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev": "cargo run -p renanclip-desktop",
+    "test": "cargo test -p renanclip-core",
+    "version": "node scripts/bump-version.mjs --check",
+    "bump": "node scripts/bump-version.mjs",
+    "build": "node scripts/bump-version.mjs && cargo build --release -p renanclip-desktop"
+  }
+}

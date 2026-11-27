@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Janela principal: eventos e comandos próprios",
+  "windows": ["main"],
+  "permissions": ["core:event:default"]
+}

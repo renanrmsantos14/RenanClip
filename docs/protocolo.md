@@ -29,3 +29,10 @@ Um MITM obtém chaves diferentes em cada lado, logo códigos diferentes; o compr
 - Imagem/arquivo: `clip` com `size`, seguido dos chunks; o receptor monta e confere o hash.
 - Apagar deixa lápide (`deleted_at`) para o item não ser ressincronizado. Duas conexões simultâneas: fica a aberta pelo aparelho de menor id.
 - Conteúdo sensível, apps ignorados, pausa e limites de tamanho são filtrados na origem e no destino.
+
+## Descoberta e rota de rede
+- **Porta**: padrão `47823` (a mesma em todos os aparelhos). Ocupada → porta automática, anunciada pelo mDNS.
+- **LAN**: mDNS `_renanclip._tcp.local.` + último endereço conhecido do par.
+- **Tailnet (opcional)**: `tailscale status --json` (prazo de 4 s). Só nós online, IPv4 100.x primeiro, sondando `47823`; 1 varredura a cada 20 s por aparelho e só se a lista de nós não for vazia. Sem o Tailscale instalado ou sem login a lista vem vazia e nada quebra.
+- **Ordem**: LAN primeiro; tailnet só se a LAN não conectar. O Tailscale é só o caminho: cifra, pareamento e autenticação são os do RenanClip (um nó da tailnet sem pareamento não troca nada).
+- **Adicionar por nome ou IP**: `nome`, `nome:porta`, `IP` ou `IP:porta`; o nome é resolvido por DNS (inclui MagicDNS) ou pela lista da tailnet.

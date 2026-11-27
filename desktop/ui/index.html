@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RenanClip</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <nav role="tablist" aria-label="Seções">
+      <button role="tab" data-tab="historico" aria-selected="true">Histórico <kbd>Ctrl+1</kbd></button>
+      <button role="tab" data-tab="aparelhos" aria-selected="false">Aparelhos <kbd>Ctrl+2</kbd><span id="dot" class="dot" title="aparelhos online"></span></button>
+      <button role="tab" data-tab="ajustes" aria-selected="false">Ajustes <kbd>Ctrl+3</kbd></button>
+    </nav>
+    <div id="upd" class="upd" hidden><span id="upd-txt"></span><button id="upd-go" class="btn small primary">Atualizar</button></div>
+  </header>
+
+  <main>
+    <section id="tab-historico" class="tab">
+      <div class="bar">
+        <input id="q" type="search" placeholder="Buscar no histórico… (digite para filtrar)" autocomplete="off" spellcheck="false" aria-label="Buscar">
+        <div id="filters" class="chips" role="group" aria-label="Filtro por tipo">
+          <button data-k="all" aria-pressed="true">Tudo</button>
+          <button data-k="text" aria-pressed="false">Texto</button>
+          <button data-k="image" aria-pressed="false">Imagens</button>
+          <button data-k="file" aria-pressed="false">Arquivos</button>
+        </div>
+      </div>
+      <ul id="list" role="listbox" aria-label="Itens copiados"></ul>
+      <div id="empty" class="empty" hidden></div>
+      <footer class="hints">
+        <span><kbd>↑↓</kbd> navegar</span><span><kbd>Enter</kbd> colar</span><span><kbd>⇧Enter</kbd> copiar</span><span><kbd>Ctrl+P</kbd> fixar</span><span><kbd>Del</kbd> apagar</span><span><kbd>Esc</kbd> fechar</span>
+      </footer>
+    </section>
+
+    <section id="tab-aparelhos" class="tab" hidden>
+      <h2>Aparelhos pareados</h2>
+      <ul id="peers" class="cards"></ul>
+      <h2>Por perto</h2>
+      <p class="muted small" id="near-help">Aparelhos na mesma rede ou na sua tailnet do Tailscale que ainda não foram pareados.</p>
+      <ul id="near" class="cards"></ul>
+      <h2>Adicionar por nome ou IP</h2>
+      <form id="addform" class="row">
+        <input id="addhost" type="text" placeholder="ex.: notebook ou 100.101.102.103:47823" autocomplete="off" spellcheck="false" aria-label="Nome ou IP do aparelho">
+        <button class="btn primary" type="submit">Parear</button>
+      </form>
+      <div class="row gap">
+        <button id="visible" class="btn">Renovar visibilidade (2 min)</button>
+        <span id="visible-msg" class="muted small"></span>
+      </div>
+      <p class="muted small">Este aparelho: <span id="me"></span></p>
+    </section>
+
+    <section id="tab-ajustes" class="tab" hidden>
+      <form id="settings" autocomplete="off"></form>
+    </section>
+  </main>
+</div>
+
+<div id="modal" class="overlay" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="m-title">
+    <h3 id="m-title"></h3>
+    <p id="m-text" class="muted"></p>
+    <div id="m-sas" class="sas" hidden></div>
+    <div class="row end gap" id="m-actions"></div>
+  </div>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<div id="ver" class="ver" aria-hidden="true"></div>
+<script src="app.js"></script>
+</body>
+</html>
