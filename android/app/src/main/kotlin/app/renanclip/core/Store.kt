@@ -148,6 +148,6 @@ class MemoryStore : ClipStore {
     @Synchronized override fun peerKey(id: String) = peers[id]?.key
     @Synchronized override fun peers() = peers.values.sortedBy { it.pairedAt }.map { Peer(it.id, it.name, it.alias, it.addr, it.pairedAt, it.lastSeen) }
     @Synchronized override fun renamePeer(id: String, alias: String) { peers[id]?.alias = alias.trim() }
-    @Synchronized override fun touchPeer(id: String, addr: String, now: Long) { peers[id]?.let { it.lastSeen = now; if (addr.isNotEmpty()) it.addr = addr } }
+    @Synchronized override fun touchPeer(id: String, addr: String, now: Long) { peers[id]?.let { if (now > 0) it.lastSeen = now; if (addr.isNotEmpty()) it.addr = addr } }
     @Synchronized override fun removePeer(id: String) = peers.remove(id) != null
 }
