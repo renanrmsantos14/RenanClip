@@ -21,6 +21,8 @@ pub struct Settings {
     pub auto_paste: bool,
     pub autostart: bool,
     pub auto_update: bool,
+    /// Procurar aparelhos também pela tailnet do Tailscale (se instalado).
+    pub tailscale: bool,
 }
 
 impl Default for Settings {
@@ -39,6 +41,7 @@ impl Default for Settings {
             auto_paste: true,
             autostart: true,
             auto_update: true,
+            tailscale: true,
         }
     }
 }

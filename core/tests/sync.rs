@@ -11,10 +11,19 @@ struct Node {
 }
 
 fn node(tag: &str) -> Node {
+    node_with(tag, |_| {})
+}
+fn node_with(tag: &str, tweak: impl FnOnce(&mut Config)) -> Node {
     let dir = std::env::temp_dir().join(format!("renanclip-test-{}-{}-{}", tag, std::process::id(), rand_tag()));
     let ev = Arc::new(Mutex::new(Vec::new()));
     let ev2 = ev.clone();
-    let e = Engine::start(Config { data_dir: dir.clone(), device_name: Some(tag.into()), port: 0, mdns: false }, move |x| ev2.lock().unwrap().push(x)).unwrap();
+    let mut cfg = Config::new(dir.clone());
+    cfg.device_name = Some(tag.into());
+    cfg.port = 0;
+    cfg.mdns = false;
+    cfg.tailscale_cmd = Some("renanclip-sem-tailscale".into());
+    tweak(&mut cfg);
+    let e = Engine::start(cfg, move |x| ev2.lock().unwrap().push(x)).unwrap();
     Node { e, ev, dir }
 }
 fn rand_tag() -> u64 {
@@ -111,7 +120,10 @@ fn inventario_traz_o_que_faltava_ao_reconectar() {
     // b volta no mesmo diretório
     let ev = Arc::new(Mutex::new(Vec::new()));
     let ev2 = ev.clone();
-    let b2 = Engine::start(Config { data_dir: b.dir.clone(), device_name: None, port: 0, mdns: false }, move |x| ev2.lock().unwrap().push(x)).unwrap();
+    let mut cfg = Config::new(b.dir.clone());
+    cfg.port = 0;
+    cfg.mdns = false;
+    let b2 = Engine::start(cfg, move |x| ev2.lock().unwrap().push(x)).unwrap();
     // sem mDNS: informa o endereço de a, já pareado
     b2.set_peer_addr(a.e.my_id(), &addr(&a).to_string());
     wait(|| b2.history("", None, 10).iter().any(|i| i.text.as_deref() == Some("enquanto b estava fora")), "inventário sincronizou");
@@ -197,4 +209,66 @@ fn retencao_remove_antigos_e_preserva_fixados() {
     let t = texts(&a);
     assert!(!t.contains(&"velho".to_string()) && t.contains(&"fixo".to_string()), "{t:?}");
     assert!(a.e.payload(&old).is_none());
+}
+
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+}
+
+/// Interface simulada: um "tailscale" falso que anuncia 127.0.0.1 como nó online da tailnet.
+fn fake_tailscale(dir: &std::path::Path, json: &str) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(dir).unwrap();
+    let p = dir.join("tailscale");
+    std::fs::write(&p, format!("#!/bin/sh\ncat <<'EOF'\n{json}\nEOF\n")).unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    p.to_string_lossy().into_owned()
+}
+
+#[test]
+fn tailnet_acha_o_par_quando_a_lan_falha_e_cifra_continua_propria() {
+    let port = free_port();
+    let tdir = std::env::temp_dir().join(format!("renanclip-fake-ts-{}-{}", std::process::id(), rand_tag()));
+    let cmd = fake_tailscale(&tdir, r#"{"Peer":{"k":{"HostName":"pc-b","DNSName":"pc-b.tail.ts.net.","TailscaleIPs":["127.0.0.1"],"Online":true},"o":{"HostName":"offline","TailscaleIPs":["127.0.0.9"],"Online":false}}}"#);
+    let b = node_with("b", |c| c.port = port);
+    let a = node_with("a", |c| {
+        c.tailscale_cmd = Some(cmd.clone());
+        c.tailnet_port = port;
+    });
+    pair(&a, &b);
+    let b_id = b.e.my_id().to_string();
+    b.e.shutdown();
+    wait(|| a.e.online_count() == 0, "b caiu");
+    // endereço guardado ruim (a LAN "falha"); só a tailnet leva até b
+    a.e.set_peer_addr(&b_id, "127.0.0.1:1");
+    let mut cfg = Config::new(b.dir.clone());
+    cfg.port = port;
+    cfg.mdns = false;
+    let b2 = Engine::start(cfg, |_| {}).unwrap();
+    let nodes = a.e.tailnet();
+    assert_eq!(nodes.len(), 2);
+    assert!(a.e.nearby().iter().any(|n| n.via == "tailnet" && n.addr == format!("127.0.0.1:{port}")), "nó online aparece; o offline não");
+    assert!(!a.e.nearby().iter().any(|n| n.addr.starts_with("127.0.0.9")));
+    wait(|| a.e.online_count() == 1, "conectou pela tailnet");
+    a.e.local_copy(LocalCopy::text("via tailnet")).unwrap();
+    wait(|| b2.history("", None, 10).iter().any(|i| i.text.as_deref() == Some("via tailnet")), "texto chegou cifrado");
+    b2.shutdown();
+    let _ = std::fs::remove_dir_all(tdir);
+}
+
+#[test]
+fn sem_tailscale_instalado_nao_ha_erro_nem_nos() {
+    let a = node("a"); // comando inexistente
+    assert!(a.e.tailnet().is_empty());
+    assert!(a.e.nearby().is_empty());
+}
+
+#[test]
+fn resolve_aceita_ip_nome_e_porta() {
+    let a = node("a");
+    assert_eq!(a.e.resolve("127.0.0.1:5000").unwrap().port(), 5000);
+    assert_eq!(a.e.resolve("127.0.0.1").unwrap().port(), 47823);
+    assert!(a.e.resolve("localhost").unwrap().ip().is_loopback());
+    assert!(a.e.resolve("").is_err());
+    assert!(a.e.resolve("host-que-nao-existe.invalid").is_err());
 }

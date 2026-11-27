@@ -6,7 +6,9 @@ use crate::discovery::{Discovery, Nearby};
 use crate::frame::*;
 use crate::pairing;
 use crate::proto::*;
+pub use crate::tailnet::Node as TailNode;
 use crate::settings::Settings;
+use crate::tailnet;
 use crate::store::*;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -24,9 +26,19 @@ pub fn now_ms() -> i64 {
 pub struct Config {
     pub data_dir: PathBuf,
     pub device_name: Option<String>,
-    /// 0 = porta automática.
+    /// Porta do servidor. 0 = automática. Padrão: `DEFAULT_PORT`, com porta automática se estiver ocupada.
     pub port: u16,
     pub mdns: bool,
+    /// Executável do Tailscale (`None` = "tailscale" no PATH). Ausente = só rede local, sem erro.
+    pub tailscale_cmd: Option<String>,
+    /// Porta onde os outros aparelhos escutam, usada ao sondar nós da tailnet.
+    pub tailnet_port: u16,
+}
+
+impl Config {
+    pub fn new(data_dir: PathBuf) -> Self {
+        Self { data_dir, device_name: None, port: DEFAULT_PORT, mdns: true, tailscale_cmd: None, tailnet_port: DEFAULT_PORT }
+    }
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -43,10 +55,13 @@ pub struct PeerView {
 
 #[derive(Serialize, Clone, Debug)]
 pub struct NearbyView {
+    /// Vazio quando vem da tailnet (o id só se conhece ao conectar).
     pub id: String,
     pub name: String,
     pub addr: String,
     pub paired: bool,
+    /// "lan" | "tailnet"
+    pub via: String,
 }
 
 enum Out {
@@ -83,6 +98,10 @@ struct Inner {
     last_applied: Mutex<Option<(String, Instant)>>,
     stop: AtomicBool,
     disc: Mutex<Option<Discovery>>,
+    tailscale_cmd: String,
+    tailnet_port: u16,
+    tail_nodes: Mutex<Vec<tailnet::Node>>,
+    tail_try: Mutex<HashMap<String, Instant>>,
 }
 
 #[derive(Clone)]
@@ -115,7 +134,11 @@ impl Engine {
         if settings.device_name.is_empty() {
             settings.device_name = cfg.device_name.clone().unwrap_or_else(hostname);
         }
-        let listener = TcpListener::bind(("0.0.0.0", cfg.port))?;
+        let listener = match TcpListener::bind(("0.0.0.0", cfg.port)) {
+            Ok(l) => l,
+            Err(_) if cfg.port != 0 => TcpListener::bind(("0.0.0.0", 0))?, // ocupada: porta automática
+            Err(e) => return Err(e.into()),
+        };
         let port = listener.local_addr()?.port();
         let inner = Arc::new(Inner {
             store,
@@ -133,6 +156,10 @@ impl Engine {
             last_applied: Mutex::new(None),
             stop: AtomicBool::new(false),
             disc: Mutex::new(None),
+            tailscale_cmd: cfg.tailscale_cmd.clone().unwrap_or_else(|| "tailscale".into()),
+            tailnet_port: cfg.tailnet_port,
+            tail_nodes: Mutex::new(Vec::new()),
+            tail_try: Mutex::new(HashMap::new()),
         });
         let e = Engine(inner.clone());
         e.save_settings(&settings);
@@ -180,6 +207,9 @@ impl Engine {
             while !me.stop.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_secs(5));
                 tick += 1;
+                if tick % 6 == 1 {
+                    me.refresh_tailnet();
+                }
                 for p in me.store.peers() {
                     me.dial_async(&p.id);
                 }
@@ -351,8 +381,14 @@ impl Engine {
             .lock()
             .unwrap()
             .values()
-            .map(|n| NearbyView { id: n.id.clone(), name: n.name.clone(), addr: n.addrs.first().map(|a| a.to_string()).unwrap_or_default(), paired: paired.contains(&n.id) })
+            .map(|n| NearbyView { id: n.id.clone(), name: n.name.clone(), addr: n.addrs.first().map(|a| a.to_string()).unwrap_or_default(), paired: paired.contains(&n.id), via: "lan".into() })
             .collect();
+        let lan_ips: HashSet<_> = self.0.nearby.lock().unwrap().values().flat_map(|n| n.addrs.iter().map(|a| a.ip())).collect();
+        for t in self.0.tail_nodes.lock().unwrap().iter().filter(|t| t.online) {
+            if let Some(ip) = t.best_ip().filter(|ip| !lan_ips.contains(ip)) {
+                v.push(NearbyView { id: String::new(), name: t.name.clone(), addr: SocketAddr::new(ip, self.0.tailnet_port).to_string(), paired: false, via: "tailnet".into() });
+            }
+        }
         v.sort_by(|a, b| a.name.cmp(&b.name));
         v
     }
@@ -402,10 +438,41 @@ impl Engine {
         pid
     }
 
+    /// Resolve "nome", "nome:porta", "IP" ou "IP:porta" (MagicDNS, hosts da LAN). Porta padrão: `tailnet_port`.
+    pub fn resolve(&self, host: &str) -> Result<SocketAddr> {
+        use std::net::ToSocketAddrs;
+        let h = host.trim();
+        if h.is_empty() || h.len() > 255 {
+            return Err(Error::Proto("endereço vazio".into()));
+        }
+        let with_port = if h.parse::<SocketAddr>().is_ok() || h.rsplit_once(':').is_some_and(|(a, p)| !a.contains(':') && p.parse::<u16>().is_ok()) {
+            h.to_string()
+        } else if h.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_ipv6()) {
+            format!("[{h}]:{}", self.0.tailnet_port)
+        } else {
+            format!("{h}:{}", self.0.tailnet_port)
+        };
+        let all: Vec<SocketAddr> = with_port.to_socket_addrs().map_err(|_| Error::Proto(format!("não encontrei \"{h}\"")))?.collect();
+        all.iter().find(|a| a.is_ipv4()).or(all.first()).copied().ok_or(Error::Proto(format!("não encontrei \"{h}\"")))
+    }
+
+    /// Nós da tailnet (vazio sem Tailscale). Atualiza na hora.
+    pub fn tailnet(&self) -> Vec<TailNode> {
+        self.0.refresh_tailnet();
+        self.0.tail_nodes.lock().unwrap().clone()
+    }
+
     /// Conexão manual (rede sem mDNS): guarda o endereço de um aparelho já pareado.
     pub fn set_peer_addr(&self, id: &str, addr: &str) {
         let _ = self.0.store.touch_peer(id, addr, 0);
         self.0.dial_async(id);
+    }
+
+    fn resolve_quiet(&self, addr: &str) -> Option<SocketAddr> {
+        if addr.is_empty() {
+            return None;
+        }
+        self.resolve(addr).ok()
     }
 
     pub fn online_count(&self) -> usize {
@@ -414,6 +481,27 @@ impl Engine {
 }
 
 impl Inner {
+    fn refresh_tailnet(&self) {
+        let on = self.settings.read().unwrap().tailscale;
+        let nodes = if on { tailnet::status(&self.tailscale_cmd) } else { vec![] };
+        let mut cur = self.tail_nodes.lock().unwrap();
+        if *cur != nodes {
+            *cur = nodes;
+            drop(cur);
+            (self.events)(Event::Peers);
+        }
+    }
+
+    /// Limita as varreduras da tailnet a uma a cada 20 s por aparelho.
+    fn tail_ready(&self, peer: &str) -> bool {
+        let mut m = self.tail_try.lock().unwrap();
+        if m.get(peer).is_some_and(|t| t.elapsed() < Duration::from_secs(20)) {
+            return false;
+        }
+        m.insert(peer.to_string(), Instant::now());
+        true
+    }
+
     fn purge(&self) -> Result<usize> {
         let s = self.settings.read().unwrap().clone();
         let n = self.store.purge(now_ms(), s.retention_days, s.store_cap_mb * 1024 * 1024)?;
@@ -502,24 +590,35 @@ impl Inner {
         let key = self.store.peer_key(peer).ok_or(Error::Proto("aparelho desconhecido".into()))?;
         let mut addrs: Vec<SocketAddr> = self.nearby.lock().unwrap().get(peer).map(|n| n.addrs.clone()).unwrap_or_default();
         if let Some(p) = self.store.peers().into_iter().find(|p| p.id == peer) {
-            if let Ok(a) = p.addr.parse::<SocketAddr>() {
+            if let Some(a) = Engine(self.clone()).resolve_quiet(&p.addr) {
                 if !addrs.contains(&a) {
                     addrs.push(a);
                 }
             }
         }
+        // 1º rede local (mDNS e último endereço bom); 2º tailnet, só se a LAN falhar.
         let mut last = Error::Proto("sem endereço".into());
         for a in addrs {
-            match self.dial_one(peer, &key, a) {
+            match self.dial_one(peer, &key, a, 3) {
                 Ok(()) => return Ok(()),
                 Err(e) => last = e,
+            }
+        }
+        let nodes: Vec<tailnet::Node> = self.tail_nodes.lock().unwrap().iter().filter(|n| n.online).cloned().collect();
+        if self.settings.read().unwrap().tailscale && !nodes.is_empty() && self.tail_ready(peer) {
+            for ip in nodes.iter().filter_map(|n| n.best_ip()) {
+                let a = SocketAddr::new(ip, self.tailnet_port);
+                match self.dial_one(peer, &key, a, 2) {
+                    Ok(()) => return Ok(()),
+                    Err(e) => last = e,
+                }
             }
         }
         Err(last)
     }
 
-    fn dial_one(self: &Arc<Self>, peer: &str, key: &[u8; 32], addr: SocketAddr) -> Result<()> {
-        let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(3))?;
+    fn dial_one(self: &Arc<Self>, peer: &str, key: &[u8; 32], addr: SocketAddr, secs: u64) -> Result<()> {
+        let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(secs))?;
         s.set_nodelay(true)?;
         s.set_read_timeout(Some(Duration::from_secs(6)))?;
         write_preamble(&mut s, MODE_SESSION)?;
