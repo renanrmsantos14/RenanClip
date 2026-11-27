@@ -8,6 +8,8 @@ pub const T_CHUNK: u8 = 2; // id(16) || offset(u32 BE) || dados
 pub const CHUNK: usize = 256 * 1024;
 pub const MAX_TEXT: usize = 1024 * 1024;
 pub const INVENTORY: usize = 200;
+/// Porta preferida do servidor (a mesma em todos os aparelhos, para achar pares pela tailnet).
+pub const DEFAULT_PORT: u16 = 47823;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ClipMeta {

@@ -10,3 +10,21 @@
 8. **Android 10+ não lê a área de transferência em segundo plano.** Envio por ação explícita (tile, compartilhar); recebimento aplicado pelo serviço.
 9. **Autoupdate próprio via GitHub Releases** (SHA256 + assinatura ed25519), no padrão do RenanTalk. Repositório público: nenhuma chave no repo.
 10. **Sem GitHub Actions em PR/push** (minutos pagos): `release.yml` só com `workflow_dispatch`.
+
+## App de PC: Tauri 2 com janela sob demanda
+Parado, o app é só o motor (Rust) e a bandeja; a janela (webview) é criada ao abrir e destruída ao fechar. Isso é o que mantém a RAM parada baixa (meta < 50 MB): uma webview aberta sozinha passa disso. Trade-off: abrir leva ~200 ms a mais que uma janela escondida.
+
+## Área de transferência no Linux: X11 por XFixes, sem polling
+O dono da seleção `CLIPBOARD` avisa a troca por evento (XFixes); zero CPU parado. Ignora o que o próprio app aplicou (pelo PID do dono). Wayland puro não é suportado nesta versão (o Cinnamon do Renan é X11). Windows usa o número de sequência da área de transferência a cada 350 ms.
+
+## Tailscale só como rota
+Fora de casa os aparelhos se acham pela tailnet, mas a segurança continua sendo a do RenanClip (ECDH + comparação de código + AES-GCM por par). Confiar só no Tailscale deixaria qualquer máquina da tailnet ler o histórico.
+
+## Atualização automática com assinatura própria
+`SHA256SUMS` assinado com Ed25519 (chave pública de 32 bytes embutida em `desktop/updater.pub`; a privada fica fora do repo). Sem assinatura válida o app não instala nada, mesmo que alguém publique um release falso.
+
+## Seletor de colagem fecha ao perder o foco
+Aberta pelo atalho global, a janela fecha ao perder o foco e ao colar; aberta pela bandeja, fica até você fechar.
+
+## Janela em processo filho
+Um webview residente custava ~150 MB e não devolvia RAM ao fechar a janela. O motor fica sem webview e a UI vira processo filho que morre ao fechar; o RPC é JSON por linha no pipe. Custo: ~300 ms para abrir a janela. O seletor (atalho global) usa o mesmo caminho.
